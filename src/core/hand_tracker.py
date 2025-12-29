@@ -4,10 +4,22 @@ Detects hands and extracts 21 landmark points per hand
 """
 
 import cv2
-import mediapipe as mp
 import numpy as np
 from typing import Optional, List, Tuple
 import logging
+
+# MediaPipe imports with error handling
+try:
+    import mediapipe as mp
+    from mediapipe.python.solutions import hands as mp_hands
+    from mediapipe.python.solutions import drawing_utils as mp_drawing
+    from mediapipe.python.solutions import drawing_styles as mp_drawing_styles
+except ImportError:
+    # Fallback for different MediaPipe versions
+    import mediapipe as mp
+    mp_hands = mp.solutions.hands
+    mp_drawing = mp.solutions.drawing_utils
+    mp_drawing_styles = mp.solutions.drawing_styles
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,9 +117,9 @@ class HandDetector:
         self.tracking_confidence = tracking_confidence
         
         # Initialize MediaPipe hands
-        self.mp_hands = mp.solutions.hands
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.mp_drawing_styles = mp.solutions.drawing_styles
+        self.mp_hands = mp_hands
+        self.mp_drawing = mp_drawing
+        self.mp_drawing_styles = mp_drawing_styles
         
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
