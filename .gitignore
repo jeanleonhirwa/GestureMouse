@@ -40,6 +40,7 @@ Thumbs.db
 config.json
 *.log
 tmp_rovodev_*
+hand_landmarker.task
 
 # Tests
 .pytest_cache/

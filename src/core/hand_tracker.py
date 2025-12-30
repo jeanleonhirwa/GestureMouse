@@ -7,19 +7,9 @@ import cv2
 import numpy as np
 from typing import Optional, List, Tuple
 import logging
-
-# MediaPipe imports with error handling
-try:
-    import mediapipe as mp
-    from mediapipe.python.solutions import hands as mp_hands
-    from mediapipe.python.solutions import drawing_utils as mp_drawing
-    from mediapipe.python.solutions import drawing_styles as mp_drawing_styles
-except ImportError:
-    # Fallback for different MediaPipe versions
-    import mediapipe as mp
-    mp_hands = mp.solutions.hands
-    mp_drawing = mp.solutions.drawing_utils
-    mp_drawing_styles = mp.solutions.drawing_styles
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -116,17 +106,35 @@ class HandDetector:
         self.detection_confidence = detection_confidence
         self.tracking_confidence = tracking_confidence
         
-        # Initialize MediaPipe hands
-        self.mp_hands = mp_hands
-        self.mp_drawing = mp_drawing
-        self.mp_drawing_styles = mp_drawing_styles
+        # Download model if needed
+        import urllib.request
+        import os
         
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=max_hands,
-            min_detection_confidence=detection_confidence,
+        model_path = "hand_landmarker.task"
+        if not os.path.exists(model_path):
+            logger.info("Downloading hand landmarker model...")
+            model_url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+            try:
+                urllib.request.urlretrieve(model_url, model_path)
+                logger.info("Model downloaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to download model: {e}")
+                raise
+        
+        # Create hand landmarker options
+        base_options = python.BaseOptions(model_asset_path=model_path)
+        options = vision.HandLandmarkerOptions(
+            base_options=base_options,
+            running_mode=vision.RunningMode.VIDEO,
+            num_hands=max_hands,
+            min_hand_detection_confidence=detection_confidence,
+            min_hand_presence_confidence=tracking_confidence,
             min_tracking_confidence=tracking_confidence
         )
+        
+        # Create the hand landmarker
+        self.detector = vision.HandLandmarker.create_from_options(options)
+        self.frame_timestamp_ms = 0
         
         logger.info("Hand detector initialized")
     
@@ -144,35 +152,71 @@ class HandDetector:
         """
         # Convert BGR to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        rgb_frame.flags.writeable = False
         
-        # Process the frame
-        results = self.hands.process(rgb_frame)
+        # Create MediaPipe Image
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
         
-        # Convert back to BGR for OpenCV
-        rgb_frame.flags.writeable = True
-        annotated_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+        # Detect hand landmarks
+        self.frame_timestamp_ms += 33  # Approximately 30 FPS
+        results = self.detector.detect_for_video(mp_image, self.frame_timestamp_ms)
+        
+        # Create annotated frame
+        annotated_frame = frame.copy()
         
         hand_landmarks = None
         
         # Extract hand landmarks
-        if results.multi_hand_landmarks and results.multi_handedness:
+        if results.hand_landmarks and results.handedness:
             # Get the first detected hand
-            landmarks = results.multi_hand_landmarks[0]
-            handedness = results.multi_handedness[0].classification[0].label
+            landmarks = results.hand_landmarks[0]
+            handedness = results.handedness[0][0].category_name
             
-            hand_landmarks = HandLandmarks(landmarks, handedness)
+            # Convert to our HandLandmarks format
+            hand_landmarks = self._create_hand_landmarks(landmarks, handedness)
             
             # Draw hand landmarks on frame
-            self.mp_drawing.draw_landmarks(
-                annotated_frame,
-                landmarks,
-                self.mp_hands.HAND_CONNECTIONS,
-                self.mp_drawing_styles.get_default_hand_landmarks_style(),
-                self.mp_drawing_styles.get_default_hand_connections_style()
-            )
+            self._draw_landmarks(annotated_frame, landmarks)
         
         return hand_landmarks, annotated_frame
+    
+    def _create_hand_landmarks(self, landmarks, handedness: str) -> HandLandmarks:
+        """Convert MediaPipe landmarks to our format"""
+        # Create a simple object to hold landmarks
+        class LandmarkList:
+            def __init__(self, lm_list):
+                self.landmark = lm_list
+        
+        return HandLandmarks(LandmarkList(landmarks), handedness)
+    
+    def _draw_landmarks(self, image: np.ndarray, hand_landmarks):
+        """Draw hand landmarks on the image"""
+        height, width, _ = image.shape
+        
+        # Convert normalized coordinates to pixel coordinates
+        landmark_points = []
+        for landmark in hand_landmarks:
+            x = int(landmark.x * width)
+            y = int(landmark.y * height)
+            landmark_points.append((x, y))
+        
+        # Draw connections
+        connections = [
+            (0, 1), (1, 2), (2, 3), (3, 4),  # Thumb
+            (0, 5), (5, 6), (6, 7), (7, 8),  # Index
+            (0, 9), (9, 10), (10, 11), (11, 12),  # Middle
+            (0, 13), (13, 14), (14, 15), (15, 16),  # Ring
+            (0, 17), (17, 18), (18, 19), (19, 20),  # Pinky
+            (5, 9), (9, 13), (13, 17)  # Palm
+        ]
+        
+        for connection in connections:
+            start_point = landmark_points[connection[0]]
+            end_point = landmark_points[connection[1]]
+            cv2.line(image, start_point, end_point, (0, 255, 0), 2)
+        
+        # Draw landmarks
+        for point in landmark_points:
+            cv2.circle(image, point, 5, (0, 0, 255), -1)
     
     def is_finger_extended(self, hand: HandLandmarks, finger_tip_idx: int) -> bool:
         """
@@ -234,6 +278,6 @@ class HandDetector:
     
     def close(self):
         """Release MediaPipe resources"""
-        if self.hands:
-            self.hands.close()
+        if self.detector:
+            self.detector.close()
             logger.info("Hand detector closed")
