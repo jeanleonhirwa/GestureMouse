@@ -181,6 +181,22 @@ class MouseController:
                 logger.warning(f"Unknown button: {button}")
         except Exception as e:
             logger.error(f"Error clicking: {e}")
+
+    def mouse_down(self, button: str = "left"):
+        """Press mouse button down"""
+        try:
+            pyautogui.mouseDown(button=button)
+            logger.debug(f"Mouse down: {button}")
+        except Exception as e:
+            logger.error(f"Error mouse down: {e}")
+
+    def mouse_up(self, button: str = "left"):
+        """Release mouse button"""
+        try:
+            pyautogui.mouseUp(button=button)
+            logger.debug(f"Mouse up: {button}")
+        except Exception as e:
+            logger.error(f"Error mouse up: {e}")
     
     def scroll(self, delta_y: float):
         """

@@ -22,6 +22,8 @@ class GestureType(Enum):
     RIGHT_CLICK = "right_click"
     SCROLL = "scroll"
     DRAG = "drag"
+    DRAG_START = "drag_start"
+    DRAG_STOP = "drag_stop"
 
 
 class GestureState:
@@ -39,6 +41,8 @@ class GestureState:
         self.debounce_time = debounce_time
         self.is_pinched = False
         self.is_middle_pinched = False
+        self.is_dragging = False
+        self.thumb_index_pinch_start = 0
         self.thumb_middle_pinch_start = 0
         self.scroll_baseline = None
         
@@ -70,6 +74,9 @@ class GestureDetector:
         self.scroll_threshold = scroll_threshold
         self.state = GestureState(debounce_time=click_debounce)
         
+        # Threshold for transitioning from click to drag (seconds)
+        self.drag_threshold = 0.5
+        
         # Previous positions for motion tracking
         self.prev_index_pos = None
         self.prev_scroll_pos = None
@@ -89,10 +96,17 @@ class GestureDetector:
             - gesture_data: Dictionary with gesture-specific data
         """
         if hand is None:
+            # Handle sudden hand loss during drag
+            if self.state.is_dragging:
+                self.state.is_dragging = False
+                self.state.is_pinched = False
+                return GestureType.DRAG_STOP, {}
+                
             self.state.current_gesture = GestureType.NONE
             self.state.is_pinched = False
             self.state.is_middle_pinched = False
             self.state.thumb_middle_pinch_start = 0
+            self.state.thumb_index_pinch_start = 0
             self.prev_index_pos = None
             self.prev_scroll_pos = None
             return GestureType.NONE, {}
@@ -114,30 +128,49 @@ class GestureDetector:
         thumb_index_dist_norm = thumb_index_dist / hand_size if hand_size > 0 else 1.0
         thumb_middle_dist_norm = thumb_middle_dist / hand_size if hand_size > 0 else 1.0
         
-        # Check for pinch gestures (clicks)
+        # Check for pinch gestures
         is_thumb_index_pinched = thumb_index_dist_norm < self.pinch_threshold
         is_thumb_middle_pinched = thumb_middle_dist_norm < self.pinch_threshold
         
-        # Detect left click (thumb-index pinch)
-        if is_thumb_index_pinched and not self.state.is_pinched:
-            if self.state.can_trigger():
+        # --- Left Click & Drag Logic ---
+        if is_thumb_index_pinched:
+            if not self.state.is_pinched:
                 self.state.is_pinched = True
-                self.state.trigger()
-                logger.debug("Left click detected")
-                return GestureType.LEFT_CLICK, {"position": index_tip[:2]}
-        elif not is_thumb_index_pinched:
-            self.state.is_pinched = False
-        
-        # Detect right click (thumb-middle pinch - Timed: 1.0s or immediate)
+                self.state.thumb_index_pinch_start = time.time()
+            
+            # Transition to drag if held long enough
+            if not self.state.is_dragging and (time.time() - self.state.thumb_index_pinch_start > self.drag_threshold):
+                self.state.is_dragging = True
+                logger.debug("Drag started")
+                return GestureType.DRAG_START, {"position": index_tip[:2]}
+                
+            if self.state.is_dragging:
+                return GestureType.DRAG, {"position": index_tip[:2]}
+        else:
+            if self.state.is_pinched:
+                # If was dragging, trigger stop
+                if self.state.is_dragging:
+                    self.state.is_dragging = False
+                    self.state.is_pinched = False
+                    logger.debug("Drag stopped")
+                    return GestureType.DRAG_STOP, {"position": index_tip[:2]}
+                
+                # If released quickly, it's a click
+                if (time.time() - self.state.thumb_index_pinch_start < self.drag_threshold):
+                    if self.state.can_trigger():
+                        self.state.is_pinched = False
+                        self.state.trigger()
+                        logger.debug("Left click detected")
+                        return GestureType.LEFT_CLICK, {"position": index_tip[:2]}
+                
+                self.state.is_pinched = False
+
+        # --- Right Click Logic ---
         if is_thumb_middle_pinched:
             if not self.state.is_middle_pinched:
                 self.state.is_middle_pinched = True
                 self.state.thumb_middle_pinch_start = time.time()
             
-            # Trigger right click if held for > 1.0s or if we want immediate
-            # PRD says: "Thumb-Middle pinch OR hold pinch 1s"
-            # Let's implement immediate with debounce for now to match current feel, 
-            # but we could add visual feedback for the 1s hold later.
             if self.state.can_trigger():
                 self.state.trigger()
                 logger.debug("Right click detected")
