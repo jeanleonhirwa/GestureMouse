@@ -3,11 +3,13 @@ Hand tracking module using MediaPipe
 Detects hands and extracts 21 landmark points per hand
 """
 
+# CRITICAL: Import mediapipe (TensorFlow) first to avoid DLL conflicts on some systems
+import mediapipe as mp
+
 import cv2
 import numpy as np
 from typing import Optional, List, Tuple
 import logging
-import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 

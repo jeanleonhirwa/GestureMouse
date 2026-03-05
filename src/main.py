@@ -3,6 +3,9 @@ GestureMouse - Main application entry point
 Webcam-based gesture control for mouse operations
 """
 
+# CRITICAL: Import mediapipe (TensorFlow) first to avoid DLL conflicts with PyQt6/OpenCV on some systems
+import mediapipe as mp
+
 import sys
 import time
 from PyQt6.QtWidgets import QApplication
