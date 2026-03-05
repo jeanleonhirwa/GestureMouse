@@ -38,6 +38,8 @@ class GestureState:
         self.last_trigger_time = 0
         self.debounce_time = debounce_time
         self.is_pinched = False
+        self.is_middle_pinched = False
+        self.thumb_middle_pinch_start = 0
         self.scroll_baseline = None
         
     def can_trigger(self) -> bool:
@@ -88,6 +90,9 @@ class GestureDetector:
         """
         if hand is None:
             self.state.current_gesture = GestureType.NONE
+            self.state.is_pinched = False
+            self.state.is_middle_pinched = False
+            self.state.thumb_middle_pinch_start = 0
             self.prev_index_pos = None
             self.prev_scroll_pos = None
             return GestureType.NONE, {}
@@ -123,11 +128,23 @@ class GestureDetector:
         elif not is_thumb_index_pinched:
             self.state.is_pinched = False
         
-        # Detect right click (thumb-middle pinch)
-        if is_thumb_middle_pinched and self.state.can_trigger():
-            self.state.trigger()
-            logger.debug("Right click detected")
-            return GestureType.RIGHT_CLICK, {"position": middle_tip[:2]}
+        # Detect right click (thumb-middle pinch - Timed: 1.0s or immediate)
+        if is_thumb_middle_pinched:
+            if not self.state.is_middle_pinched:
+                self.state.is_middle_pinched = True
+                self.state.thumb_middle_pinch_start = time.time()
+            
+            # Trigger right click if held for > 1.0s or if we want immediate
+            # PRD says: "Thumb-Middle pinch OR hold pinch 1s"
+            # Let's implement immediate with debounce for now to match current feel, 
+            # but we could add visual feedback for the 1s hold later.
+            if self.state.can_trigger():
+                self.state.trigger()
+                logger.debug("Right click detected")
+                return GestureType.RIGHT_CLICK, {"position": middle_tip[:2]}
+        else:
+            self.state.is_middle_pinched = False
+            self.state.thumb_middle_pinch_start = 0
         
         # Check if index and middle fingers are extended (scroll mode)
         index_extended = self._is_finger_extended(hand, HandLandmarks.INDEX_FINGER_TIP)
