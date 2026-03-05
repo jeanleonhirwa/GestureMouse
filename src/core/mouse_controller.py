@@ -64,7 +64,8 @@ class MouseController:
     def __init__(self,
                  sensitivity: float = 1.5,
                  smoothing: float = 0.3,
-                 scroll_sensitivity: float = 5.0):
+                 scroll_sensitivity: float = 5.0,
+                 acceleration_factor: float = 1.2):
         """
         Initialize mouse controller
         
@@ -72,10 +73,12 @@ class MouseController:
             sensitivity: Cursor movement speed multiplier (1.0 = normal, higher = faster)
             smoothing: Smoothing factor (0-1, lower = more smoothing)
             scroll_sensitivity: Scroll speed multiplier
+            acceleration_factor: Multiplier for fast movements (non-linear)
         """
         self.sensitivity = sensitivity
         self.smoothing_filter = SmoothingFilter(alpha=smoothing)
         self.scroll_sensitivity = scroll_sensitivity
+        self.acceleration_factor = acceleration_factor
         
         # Get screen dimensions
         self.screen_width, self.screen_height = pyautogui.size()
@@ -116,7 +119,7 @@ class MouseController:
     
     def move_cursor(self, x: float, y: float, smooth: bool = True):
         """
-        Move cursor to specified position
+        Move cursor to specified position with acceleration
         
         Args:
             x: Normalized x coordinate (0-1)
@@ -125,14 +128,37 @@ class MouseController:
         """
         try:
             # Map to screen coordinates
-            screen_x, screen_y = self.map_to_screen(x, y)
+            target_x, target_y = self.map_to_screen(x, y)
             
             # Apply smoothing if enabled
             if smooth:
-                screen_x, screen_y = self.smoothing_filter.filter(screen_x, screen_y)
+                target_x, target_y = self.smoothing_filter.filter(target_x, target_y)
             
-            # Move cursor (duration=0 for instant movement)
-            pyautogui.moveTo(int(screen_x), int(screen_y), duration=0)
+            # Calculate distance from current mouse position
+            curr_x, curr_y = pyautogui.position()
+            dx = target_x - curr_x
+            dy = target_y - curr_y
+            distance = np.sqrt(dx**2 + dy**2)
+            
+            # Apply acceleration curve
+            if distance > 2:  # Threshold to ignore micro-jitter
+                # Normalize distance to a factor (0-1 based on screen size)
+                diag = np.sqrt(self.screen_width**2 + self.screen_height**2)
+                norm_dist = distance / diag
+                
+                # Apply acceleration: multiplier increases with distance
+                # We use a power curve for a more natural feel
+                multiplier = 1.0 + (norm_dist * self.acceleration_factor * 15)
+                
+                # Move relative to current position with acceleration
+                new_x = curr_x + dx * multiplier
+                new_y = curr_y + dy * multiplier
+                
+                # Clamp to screen bounds
+                new_x = max(0, min(self.screen_width - 1, new_x))
+                new_y = max(0, min(self.screen_height - 1, new_y))
+                
+                pyautogui.moveTo(int(new_x), int(new_y), duration=0)
             
         except Exception as e:
             logger.error(f"Error moving cursor: {e}")
