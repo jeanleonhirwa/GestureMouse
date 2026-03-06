@@ -56,6 +56,11 @@ class TrackingWorker(QObject):
         self.frame_count = 0
         self.fps_start_time = time.time()
         self.current_fps = 0.0
+        
+        # Throttling state
+        self.last_hand_time = time.time()
+        self.throttle_delay = 0.2  # 5 FPS (1/0.2)
+        self.normal_delay = 0.01   # ~30-60 FPS
     
     def initialize(self):
         """Initialize all components"""
@@ -120,6 +125,15 @@ class TrackingWorker(QObject):
                 time.sleep(0.1)
                 continue
             
+            # --- Smart Throttling ---
+            current_time = time.time()
+            if current_time - self.last_hand_time > 10.0:
+                # No hand for 10s, throttle to 5 FPS
+                time.sleep(self.throttle_delay)
+            else:
+                # Normal operation
+                time.sleep(self.normal_delay)
+            
             try:
                 # Read frame from camera
                 success, frame = self.camera.read_frame()
@@ -131,6 +145,7 @@ class TrackingWorker(QObject):
                 hand_detected = hand_landmarks is not None
                 
                 if hand_detected:
+                    self.last_hand_time = time.time()
                     # Get index finger position
                     index_pos = hand_landmarks.get_landmark(8)[:2] # x, y
                     

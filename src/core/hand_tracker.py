@@ -142,18 +142,22 @@ class HandDetector:
     
     def detect(self, frame: np.ndarray) -> Tuple[Optional[HandLandmarks], np.ndarray]:
         """
-        Detect hands in a frame
+        Detect hands in a frame with resolution optimization
         
         Args:
-            frame: Input frame (BGR format)
+            frame: Input frame (BGR format, typically 640x480)
             
         Returns:
             Tuple of (hand_landmarks, annotated_frame)
-            - hand_landmarks: HandLandmarks object if hand detected, None otherwise
-            - annotated_frame: Frame with hand landmarks drawn
         """
+        # OPTIMIZATION: Downscale frame for MediaPipe processing (320x240 is enough)
+        # Full frame used for display, smaller frame used for engine
+        h, w = frame.shape[:2]
+        engine_w, engine_h = 320, 240
+        small_frame = cv2.resize(frame, (engine_w, engine_h))
+        
         # Convert BGR to RGB for MediaPipe
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
         
         # Create MediaPipe Image
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -162,7 +166,7 @@ class HandDetector:
         self.frame_timestamp_ms += 33  # Approximately 30 FPS
         results = self.detector.detect_for_video(mp_image, self.frame_timestamp_ms)
         
-        # Create annotated frame
+        # Create annotated frame (on original resolution)
         annotated_frame = frame.copy()
         
         hand_landmarks = None
