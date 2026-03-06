@@ -21,6 +21,7 @@ from ui.main_window import MainWindow
 from ui.system_tray import SystemTrayManager
 from ui.calibration_wizard import CalibrationWizard
 from ui.settings_dialog import SettingsDialog
+from ui.osd_overlay import OSDOverlay
 from utils.config import ConfigManager
 
 logging.basicConfig(
@@ -277,6 +278,9 @@ class GestureMouseApp:
         self.tray_manager.setup()
         self.tray_manager.show()
         
+        # OSD Overlay
+        self.osd = OSDOverlay()
+        
         # Tracking components
         self.tracking_thread = None
         self.tracking_worker = None
@@ -495,6 +499,10 @@ class GestureMouseApp:
         self.main_window.update_hand_detected(hand_detected)
         self.main_window.update_gesture(gesture)
         self.main_window.update_fps(fps)
+        
+        # Show OSD message for significant gestures
+        if gesture not in ["None", "Cursor Move", "Dragging", "Scroll Mode"]:
+            self.osd.show_message(gesture)
     
     def _on_tracking_error(self, error: str):
         """Handle tracking error"""
