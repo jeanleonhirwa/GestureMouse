@@ -270,6 +270,7 @@ class GestureMouseApp:
         
         # Create main window
         self.main_window = MainWindow()
+        self._populate_monitors()
         
         # Create system tray
         self.tray_manager = SystemTrayManager(self.app)
@@ -388,6 +389,43 @@ class GestureMouseApp:
             
             self.tray_manager.show_message("GestureMouse", "Settings applied successfully")
             logger.info("Advanced settings updated and applied")
+
+    def _populate_monitors(self):
+        """Populate the monitor selection combo box"""
+        self.main_window.camera_combo.clear()
+        self.screens = QApplication.screens()
+        for i, screen in enumerate(self.screens):
+            name = screen.name()
+            geo = screen.geometry()
+            self.main_window.camera_combo.addItem(
+                f"Monitor {i}: {name} ({geo.width()}x{geo.height()})"
+            )
+        
+        # Connect signal
+        self.main_window.camera_combo.currentIndexChanged.connect(self._on_monitor_changed)
+        
+        # Load saved monitor
+        saved_monitor = self.config.get('mouse', 'target_monitor', 0)
+        if 0 <= saved_monitor < self.main_window.camera_combo.count():
+            self.main_window.camera_combo.setCurrentIndex(saved_monitor)
+
+    def _on_monitor_changed(self, index: int):
+        """Handle monitor selection change"""
+        if index < 0 or index >= len(self.screens):
+            return
+            
+        screen = self.screens[index]
+        geo = screen.geometry()
+        
+        self.config.set('mouse', 'target_monitor', index)
+        self.config.save()
+        
+        if self.tracking_worker and self.tracking_worker.mouse_controller:
+            self.tracking_worker.mouse_controller.set_monitor(
+                index, geo.width(), geo.height(), geo.x(), geo.y()
+            )
+        
+        logger.info(f"Target monitor changed to index {index}")
 
     def _on_start_stop_clicked(self):
         """Handle start/stop button click"""

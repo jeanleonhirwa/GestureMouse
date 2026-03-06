@@ -80,8 +80,11 @@ class MouseController:
         self.scroll_sensitivity = scroll_sensitivity
         self.acceleration_factor = acceleration_factor
         
-        # Get screen dimensions
+        # Monitor management
+        self.target_monitor = 0  # 0 means primary or all (standard behavior)
         self.screen_width, self.screen_height = pyautogui.size()
+        self.monitor_offset_x = 0
+        self.monitor_offset_y = 0
         
         # Define active tracking area (calibrated range)
         self.x_min, self.y_min = 0.1, 0.1
@@ -126,11 +129,20 @@ class MouseController:
         screen_x = int(x_adjusted * self.screen_width * self.sensitivity)
         screen_y = int(y_adjusted * self.screen_height * self.sensitivity)
         
-        # Clamp to screen bounds
-        screen_x = max(0, min(self.screen_width - 1, screen_x))
-        screen_y = max(0, min(self.screen_height - 1, screen_y))
+        # Add monitor offset
+        screen_x += self.monitor_offset_x
+        screen_y += self.monitor_offset_y
         
         return screen_x, screen_y
+
+    def set_monitor(self, monitor_index: int, width: int, height: int, offset_x: int, offset_y: int):
+        """Set target monitor parameters"""
+        self.target_monitor = monitor_index
+        self.screen_width = width
+        self.screen_height = height
+        self.monitor_offset_x = offset_x
+        self.monitor_offset_y = offset_y
+        logger.info(f"Monitor {monitor_index} set as target: {width}x{height} offset({offset_x}, {offset_y})")
     
     def move_cursor(self, x: float, y: float, smooth: bool = True):
         """
