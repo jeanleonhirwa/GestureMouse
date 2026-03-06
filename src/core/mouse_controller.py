@@ -83,11 +83,20 @@ class MouseController:
         # Get screen dimensions
         self.screen_width, self.screen_height = pyautogui.size()
         
-        # Define active tracking area (avoid edges)
-        self.margin = 0.1  # 10% margin on each side
+        # Define active tracking area (calibrated range)
+        self.x_min, self.y_min = 0.1, 0.1
+        self.x_max, self.y_max = 0.9, 0.9
         
         logger.info(f"Mouse controller initialized. Screen: {self.screen_width}x{self.screen_height}")
     
+    def set_active_area(self, x_min: float, y_min: float, x_max: float, y_max: float):
+        """Update the tracking boundaries based on calibration"""
+        self.x_min = max(0.0, min(1.0, x_min))
+        self.y_min = max(0.0, min(1.0, y_min))
+        self.x_max = max(0.0, min(1.0, x_max))
+        self.y_max = max(0.0, min(1.0, y_max))
+        logger.info(f"Active area updated: ({self.x_min}, {self.y_min}) to ({self.x_max}, {self.y_max})")
+
     def map_to_screen(self, x: float, y: float) -> Tuple[int, int]:
         """
         Map normalized hand coordinates (0-1) to screen coordinates
@@ -99,9 +108,15 @@ class MouseController:
         Returns:
             Tuple of (screen_x, screen_y) in pixels
         """
-        # Apply margin to use only center portion of tracking area
-        x_adjusted = (x - self.margin) / (1 - 2 * self.margin)
-        y_adjusted = (y - self.margin) / (1 - 2 * self.margin)
+        # Apply calibrated range
+        range_x = self.x_max - self.x_min
+        range_y = self.y_max - self.y_min
+        
+        if range_x <= 0: range_x = 0.1
+        if range_y <= 0: range_y = 0.1
+
+        x_adjusted = (x - self.x_min) / range_x
+        y_adjusted = (y - self.y_min) / range_y
         
         # Clamp to valid range
         x_adjusted = max(0.0, min(1.0, x_adjusted))

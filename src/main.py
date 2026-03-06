@@ -19,6 +19,7 @@ from core.gesture_detector import GestureDetector, GestureType
 from core.mouse_controller import MouseController
 from ui.main_window import MainWindow
 from ui.system_tray import SystemTrayManager
+from ui.calibration_wizard import CalibrationWizard
 from utils.config import ConfigManager
 
 logging.basicConfig(
@@ -34,12 +35,14 @@ class TrackingWorker(QObject):
     # Signals
     frame_processed = pyqtSignal(object, bool, str, float)  # frame, hand_detected, gesture, fps
     error_occurred = pyqtSignal(str)
+    hand_position_captured = pyqtSignal(float, float) # normalized x, y
     
     def __init__(self, config: ConfigManager):
         super().__init__()
         self.config = config
         self.is_running = False
         self.is_paused = False
+        self.calibration_active = False
         
         # Initialize components
         self.camera = None
@@ -90,6 +93,13 @@ class TrackingWorker(QObject):
                 scroll_sensitivity=mouse_config.get('scroll_sensitivity', 5.0)
             )
             
+            # Load active area from config
+            active_area = mouse_config.get('active_area', {'x_min': 0.1, 'y_min': 0.1, 'x_max': 0.9, 'y_max': 0.9})
+            self.mouse_controller.set_active_area(
+                active_area['x_min'], active_area['y_min'],
+                active_area['x_max'], active_area['y_max']
+            )
+            
             logger.info("All components initialized successfully")
             return True
             
@@ -118,11 +128,19 @@ class TrackingWorker(QObject):
                 hand_landmarks, annotated_frame = self.hand_detector.detect(frame)
                 hand_detected = hand_landmarks is not None
                 
-                # Detect gesture
-                gesture_type, gesture_data = self.gesture_detector.detect_gesture(hand_landmarks)
-                
-                # Execute mouse actions based on gesture
-                gesture_name = self._execute_gesture(gesture_type, gesture_data)
+                if hand_detected:
+                    # Get index finger position
+                    index_pos = hand_landmarks.get_landmark(8)[:2] # x, y
+                    
+                    if self.calibration_active:
+                        self.hand_position_captured.emit(index_pos[0], index_pos[1])
+                    else:
+                        # Detect gesture
+                        gesture_type, gesture_data = self.gesture_detector.detect_gesture(hand_landmarks)
+                        # Execute mouse actions
+                        gesture_name = self._execute_gesture(gesture_type, gesture_data)
+                else:
+                    gesture_name = "None"
                 
                 # Calculate FPS
                 self.frame_count += 1
@@ -136,7 +154,7 @@ class TrackingWorker(QObject):
                 self.frame_processed.emit(
                     annotated_frame,
                     hand_detected,
-                    gesture_name,
+                    gesture_name if not self.calibration_active else "Calibration",
                     self.current_fps
                 )
                 
@@ -174,6 +192,22 @@ class TrackingWorker(QObject):
             if gesture_config.get('right_click_enabled', True):
                 self.mouse_controller.click('right')
                 return "Right Click"
+        
+        elif gesture_type == GestureType.DRAG_START:
+            if gesture_config.get('left_click_enabled', True):
+                self.mouse_controller.mouse_down('left')
+                return "Drag Start"
+        
+        elif gesture_type == GestureType.DRAG:
+            if gesture_config.get('left_click_enabled', True):
+                position = gesture_data.get('position', (0.5, 0.5))
+                self.mouse_controller.move_cursor(position[0], position[1])
+                return "Dragging"
+        
+        elif gesture_type == GestureType.DRAG_STOP:
+            if gesture_config.get('left_click_enabled', True):
+                self.mouse_controller.mouse_up('left')
+                return "Drag Stop"
         
         elif gesture_type == GestureType.SCROLL:
             if gesture_config.get('scroll_enabled', True):
@@ -241,6 +275,7 @@ class GestureMouseApp:
         # Main window signals
         self.main_window.start_button.clicked.connect(self._on_start_stop_clicked)
         self.main_window.minimize_button.clicked.connect(self._on_minimize_clicked)
+        self.main_window.calibrate_button.clicked.connect(self._on_calibrate_clicked)
         self.main_window.closing.connect(self._on_window_closing)
         
         # Settings signals
@@ -266,6 +301,46 @@ class GestureMouseApp:
         self.tray_manager.pause_tracking_requested.connect(self._on_pause_tracking)
         self.tray_manager.resume_tracking_requested.connect(self._on_resume_tracking)
         self.tray_manager.exit_requested.connect(self._on_exit)
+    
+    def _on_calibrate_clicked(self):
+        """Handle calibrate button click"""
+        if not self.is_tracking:
+            self.tray_manager.show_message("GestureMouse", "Please start tracking before calibrating")
+            return
+            
+        self.calibration_wizard = CalibrationWizard()
+        self.calibration_wizard.calibration_complete.connect(self._on_calibration_complete)
+        self.calibration_wizard.calibration_cancelled.connect(self._on_calibration_cancelled)
+        
+        # Connect worker signal to wizard
+        self.tracking_worker.hand_position_captured.connect(self.calibration_wizard.capture_point)
+        self.tracking_worker.calibration_active = True
+        
+        self.calibration_wizard.show()
+        logger.info("Calibration started")
+
+    def _on_calibration_complete(self, x_min, y_min, x_max, y_max):
+        """Handle calibration completion"""
+        self.tracking_worker.calibration_active = False
+        
+        # Update mouse controller
+        if self.tracking_worker.mouse_controller:
+            self.tracking_worker.mouse_controller.set_active_area(x_min, y_min, x_max, y_max)
+            
+        # Save to config
+        self.config.set('mouse', 'active_area', {
+            'x_min': x_min, 'y_min': y_min,
+            'x_max': x_max, 'y_max': y_max
+        })
+        self.config.save()
+        
+        self.tray_manager.show_message("GestureMouse", "Calibration successful!")
+        logger.info("Calibration completed and saved")
+
+    def _on_calibration_cancelled(self):
+        """Handle calibration cancellation"""
+        self.tracking_worker.calibration_active = False
+        logger.info("Calibration cancelled")
     
     def _on_start_stop_clicked(self):
         """Handle start/stop button click"""
