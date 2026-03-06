@@ -20,6 +20,7 @@ from core.mouse_controller import MouseController
 from ui.main_window import MainWindow
 from ui.system_tray import SystemTrayManager
 from ui.calibration_wizard import CalibrationWizard
+from ui.settings_dialog import SettingsDialog
 from utils.config import ConfigManager
 
 logging.basicConfig(
@@ -241,6 +242,21 @@ class TrackingWorker(QObject):
             self.mouse_controller.set_sensitivity(sensitivity)
             self.mouse_controller.set_smoothing(smoothing)
 
+    def update_gesture_settings(self, pinch_threshold: float, scroll_threshold: float, click_debounce: float):
+        """Update gesture detector settings"""
+        if self.gesture_detector:
+            self.gesture_detector.pinch_threshold = pinch_threshold
+            self.gesture_detector.scroll_threshold = scroll_threshold
+            self.gesture_detector.state.debounce_time = click_debounce
+
+    def update_tracking_settings(self, detection_confidence: float, tracking_confidence: float):
+        """Update hand detector settings"""
+        if self.hand_detector:
+            # MediaPipe tasks don't support live config updates easily, 
+            # but we can re-initialize if needed. For now just update locals.
+            self.hand_detector.detection_confidence = detection_confidence
+            self.hand_detector.tracking_confidence = tracking_confidence
+
 
 class GestureMouseApp:
     """Main application controller"""
@@ -276,6 +292,7 @@ class GestureMouseApp:
         self.main_window.start_button.clicked.connect(self._on_start_stop_clicked)
         self.main_window.minimize_button.clicked.connect(self._on_minimize_clicked)
         self.main_window.calibrate_button.clicked.connect(self._on_calibrate_clicked)
+        self.main_window.settings_button.clicked.connect(self._on_settings_clicked)
         self.main_window.closing.connect(self._on_window_closing)
         
         # Settings signals
@@ -342,6 +359,36 @@ class GestureMouseApp:
         self.tracking_worker.calibration_active = False
         logger.info("Calibration cancelled")
     
+    def _on_settings_clicked(self):
+        """Handle advanced settings button click"""
+        dialog = SettingsDialog(self.config, self.main_window)
+        if dialog.exec():
+            new_settings = dialog.get_settings()
+            
+            # Update configuration
+            for section, values in new_settings.items():
+                for key, value in values.items():
+                    self.config.set(section, key, value)
+            self.config.save()
+            
+            # Update worker if running
+            if self.tracking_worker:
+                gestures = new_settings['gestures']
+                self.tracking_worker.update_gesture_settings(
+                    gestures['pinch_threshold'],
+                    gestures['scroll_threshold'],
+                    gestures['click_debounce']
+                )
+                
+                tracking = new_settings['tracking']
+                self.tracking_worker.update_tracking_settings(
+                    tracking['detection_confidence'],
+                    tracking['tracking_confidence']
+                )
+            
+            self.tray_manager.show_message("GestureMouse", "Settings applied successfully")
+            logger.info("Advanced settings updated and applied")
+
     def _on_start_stop_clicked(self):
         """Handle start/stop button click"""
         if self.is_tracking:

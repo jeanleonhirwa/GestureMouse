@@ -91,6 +91,10 @@ class MainWindow(QMainWindow):
         self.calibrate_button.setMinimumHeight(40)
         button_layout.addWidget(self.calibrate_button)
         
+        self.settings_button = QPushButton("Advanced Settings")
+        self.settings_button.setMinimumHeight(40)
+        button_layout.addWidget(self.settings_button)
+        
         main_layout.addLayout(button_layout)
     
     def create_status_panel(self) -> QGroupBox:
